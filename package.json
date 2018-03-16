@@ -1,0 +1,27 @@
+{
+  "name": "ecoproxy",
+  "version": "0.0.1",
+  "description": "The ECO global survival game establish a TCP connection from client to server. This Tool acts as a proxy and can patch the exchanged data.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/sbeh/ecoproxy.git"
+  },
+  "keywords": [
+    "game",
+    "ECO",
+    "TCP",
+    "proxy",
+    "patch",
+    "data"
+  ],
+  "author": "sbeh",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/sbeh/ecoproxy/issues"
+  },
+  "homepage": "https://github.com/sbeh/ecoproxy#readme"
+}
