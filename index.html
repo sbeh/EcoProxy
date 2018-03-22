@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="UTF-8" />
+        <title>EcoProxy</title>
+        <script src=https://unpkg.com/vue/dist/vue.js></script>
+    </head>
+    <body>
+        <template id=token-template>
+            <div>
+                {{ value.token }} ({{ value.username }}) <input v-model=value.replaceWith placeholder='Replace with' />
+            </div>
+        </template>
+        <script>
+        Vue.component('token', {
+            template: '#token-template',
+            props: ['value'],
+            created() {
+                this.$watch('value.replaceWith', () => {
+                    console.log('tokenReplace')
+                    ipc.send('tokenReplace', {
+                        token: this.value.token,
+                        replaceWith: this.value.replaceWith
+                    })
+                })
+            },
+        })
+        </script>
+        
+        <template id=pair-template>
+            <div>
+                {{ value.clientAddress }} -> {{ value.proxy }}
+                <button @click=del>X</button>
+            </div>
+        </template>
+        <script>
+        Vue.component('pair', {
+            template: '#pair-template',
+            props: ['value'],
+            methods: {
+                del() {
+                    ipc.send('pairDel', this.value.id)
+                }
+            }
+        })
+        </script>
+
+        <template id=proxy-template>
+            <div>
+                {{ value.name }} = {{ value.source.host }}:{{ value.source.port }} -> {{ value.target.host }}:{{ value.target.port }}
+                <button @click=del>X</button>
+            </div>
+        </template>
+        <script>
+        Vue.component('proxy', {
+            template: '#proxy-template',
+            props: ['value'],
+            methods: {
+                del() {
+                    ipc.send('proxyDel', this.value.id)
+                },
+            },
+        })
+        </script>
+        
+        <template id=newproxy-template>
+            <div>
+                <input v-model=proxy.name placeholder='Proxy name'/>
+                <input v-model=proxy.source.host placeholder='Source host (optional)'/>
+                <input v-model=proxy.source.port placeholder='Source port'/>
+                <input v-model=proxy.target.host placeholder='Target host' />
+                <input v-model=proxy.target.port placeholder='Target port' />
+                <button @click='$emit("add", proxy); reset()'>+</button>
+            </div>
+        </template>
+        <script>
+        Vue.component('newproxy', {
+            template: '#newproxy-template',
+            data() {return {
+                proxy: {
+                    name: null,
+                    source: {
+                        host: null,
+                        port: null,
+                    },
+                    target: {
+                        host: null,
+                        port: null,
+                    },
+                },
+            }},
+            created() {
+                this.reset()
+            },
+            methods: {
+                reset() {
+                    this.proxy.name = null
+                    this.proxy.source.host = null
+                    this.proxy.source.port = null
+                    this.proxy.target.host = null
+                    this.proxy.target.port = null
+                },
+            }
+        })
+        </script>
+                
+        <div id=content>
+            <h1>Proxies</h1>
+            <proxy v-for='(_, i) in proxies' v-model=proxies[i]></proxy>
+            <newproxy @add=proxyAdd></newproxy>
+
+            <h1>Clients</h1>
+            <pair v-for='(_, i) in pairs' v-model=pairs[i]></pair>
+
+            <h1>Tokens</h1>
+            <token v-for='(_, i) in tokens' v-model=tokens[i]></token>
+        </div>
+        
+        <script>
+        var electron = require('electron')
+        var ipc = electron.ipcRenderer
+
+        var app = new Vue({
+            el: '#content',
+            data: {
+                proxies: [],
+                pairs: [],
+                tokens: [],
+            },
+            created() {
+                ipc.on('proxyAdd', (_, proxy) => {
+                    this.proxies.push(proxy)
+                })
+                ipc.on('proxyDel', (_, id) => {
+                    var i = this.proxies.findIndex(p => p.id == id)
+                    this.proxies.splice(i, 1)
+                })
+
+                ipc.on('pairAdd', (_, pair) => {
+                    this.pairs.push(pair)
+                })
+                ipc.on('pairDel', (_, id) => {
+                    var i = this.pairs.findIndex(p => p.id == id)
+                    this.pairs.splice(i, 1)                    
+                })
+
+                ipc.on('tokenAdd', (event, token) => {
+                    var i = this.tokens.findIndex(t => t.token == token.token)
+                    if (i >= 0)
+                        this.tokens[i].username = token.username
+                    else {
+                        token.replaceWith = null
+                        this.tokens.push(token)
+                    }
+                })
+
+                ipc.send('proxyGet')
+                ipc.send('pairGet')
+                ipc.send('tokenGet')
+            },
+            methods: {
+                proxyAdd(proxy) {
+                    ipc.send('proxyAdd', proxy)
+                },
+            }
+        })
+        </script>
+    </body>
+</html>

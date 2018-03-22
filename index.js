@@ -1,119 +1,122 @@
+var electron = require('electron')
+
+// Keep a global reference of the window object, if you don't, the window will
+// be closed automatically when the JavaScript object is garbage collected.
+var window
+
+function createWindow () {
+    // Create the browser window.
+    window = new electron.BrowserWindow({width: 800, height: 600})
+
+    // and load the index.html of the app.
+    window.loadURL(`file://${__dirname}/index.html`)
+
+    // Open the DevTools.
+    window.webContents.openDevTools()
+
+    // Emitted when the window is closed.
+    window.on('closed', () => {
+        // Dereference the window object, usually you would store windows
+        // in an array if your app supports multi windows, this is the time
+        // when you should delete the corresponding element.
+        window = null
+    })
+}
+
+electron.app.on('ready', createWindow)
+
+// Quit when all windows are closed.
+electron.app.on('window-all-closed', () => {
+    // On macOS it is common for applications and their menu bar
+    // to stay active until the user quits explicitly with Cmd + Q
+    if (process.platform !== 'darwin') {
+        electron.app.quit()
+    }
+})
+
+electron.app.on('activate', () => {
+    // On macOS it's common to re-create a window in the app when the
+    // dock icon is clicked and there are no other windows open.
+    if (window === null) {
+        createWindow()
+    }
+})
+
+var proxy = require('./proxy')
+
+var proxies = []
 var pairs = []
+var tokens = []
 
-const net = require('net')
+var ipc = electron.ipcMain
 
-function startProxy(name, listen, target_host, target_port) {
-    const proxy = net.createServer({
-        allowHalfOpen: true
-    })
+function proxyAdd(event, p) {
+    p.id = proxies.length
+    proxies.push(new proxy.Proxy(p.name, p.source, p.target))
+    event.sender.send('proxyAdd', p)
 
-    proxy.on('connection', client => {
-        var pair = {
-            id: 0
-        }
-        while(pairs[pair.id])
-            ++pair.id
+    proxies[p.id].on('connection', pair => {
+        pair.id = pairs.length
         pairs.push(pair)
-
-        pair.client = client
-        pair.server = net.createConnection({
-            host: target_host,
-            port: target_port
+        event.sender.send('pairAdd', {
+            id: pair.id,
+            clientAddress: pair.client.remoteAddress,
+            proxy: pair.proxy.name,
         })
 
-        console.debug('Pair', pair.id, '|', 'Client connected from', client.remoteAddress, 'to proxy', name)
-
-        function client_data(data) {
-            pair.server.write(data)
-        }
-        pair.client.on('data', client_data)
-
-        function server_data(data) {
-            pair.client.write(data)
-        }
-        pair.server.on('data', server_data)
-
-        pair.client.once('end', () => {
-            console.debug('Pair', pair.id, '|', 'Client send FIN to proxy')
-
-            if (pair.server) {
-                pair.server.end()
+        pair.on('token', (token, callback) => {
+            var send = false
+            var i = tokens.findIndex(t => t.token == token.token)
+            if (i == -1) {
+                i = tokens.length
+                tokens.push(token)
+                send = true
+            } else if (tokens[i].username != token.username) {
+                tokens[i].username = token.username
+                send = true
             }
+            if (send)
+                event.sender.send('tokenAdd', tokens[i])
+            callback(tokens[i].replaceWith)
         })
-        pair.server.once('end', () => {
-            console.debug('Pair', pair.id, '|', 'Server send FIN to proxy')
-
-            if (pair.client) {
-                pair.client.end()
-            }
-        })
-
-        pair.client.once('error', error => {
-            if (error.code === 'ECONNRESET') {
-                console.debug('Pair', pair.id, '|', 'Client send RESET to proxy')
-            } else {
-                console.debug('Pair', pair.id, '|', 'Client send ERROR to proxy', "\n", error)
-            }
-
-            if (pair.server) {
-                pair.server.end()
-            }
-        })
-        pair.server.once('error', error => {
-            if (error.code === 'ECONNRESET') {
-                console.debug('Pair', pair.id, '|', 'Server send RESET to proxy')
-            } else {
-                console.debug('Pair', pair.id, '|', 'Server send ERROR to proxy', "\n", error)
-            }
-
-            if (pair.client) {
-                pair.client.end()
-            }
-        })
-
-        pair.client.once('close', _/*had_error*/ => {
-            console.debug('Pair', pair.id, '|', 'Connection from client to proxy fully closed')
-
-            delete pair.client
-
-            if (pair.server) {
-                pair.server.removeListener('data', server_data)
-                pair.server.on('data', data => {
-                    console.error('Pair', pair.id, '|', 'Lost data from Server to Client, because Client connection was unavailable')
-                })
-                pair.server.end()
-            } else {
-                console.debug('Pair', pair.id, '|', 'Disconnected')
-
-                delete pairs[pair.id]
-            }
-        })
-        pair.server.once('close', _/*had_error*/ => {
-            console.debug('Pair', pair.id, '|', 'Connection from proxy to server fully closed')
-
-            delete pair.server
-
-            if (pair.client) {
-                pair.client.removeListener('data', client_data)
-                pair.client.on('data', data => {
-                    console.error('Pair', pair.id, '|', 'Lost data from Client to Server, because Server connection was unavailable')
-                })
-                pair.client.end()
-            } else {
-                console.debug('Pair', pair.id, '|', 'Disconnected')
-
-                delete pairs[pair.id]
-            }
+        pair.on('close', () => {
+            delete pairs[pair.id]
+            event.sender.send('pairDel', pair.id)
         })
     })
-    proxy.listen(listen)
 }
 
-const ECO_Server_Configs_Network = {
-    IPAddress: 'localhost',
-    GameServerPort: 3000,
-    WebServerPort: 3001
-}
+ipc.on('proxyGet', event => {
+    proxies.forEach(p => event.sender.send('proxyAdd', p))
+})
 
-startProxy('GameServer', ECO_Server_Configs_Network.GameServerPort, ECO_Server_Configs_Network.IPAddress, ECO_Server_Configs_Network.GameServerPort)
-startProxy('WebServer', ECO_Server_Configs_Network.WebServerPort, ECO_Server_Configs_Network.IPAddress, ECO_Server_Configs_Network.WebServerPort)
+ipc.on('proxyAdd', proxyAdd)
+
+ipc.on('proxyDel', (event, id) => {
+    proxies[id].close(() => {
+        delete proxies[id]
+        event.sender.send('proxyDel', id)
+    })
+})
+
+ipc.on('pairGet', event => {
+    pairs.forEach(pair => event.sender.send('pairAdd', {
+        id: pair.id,
+        clientAddress: pair.client.remoteAddress,
+        proxy: pair.proxy.name,
+    }))
+})
+
+ipc.on('pairDel', (event, id) => {
+    pairs[id].client.end()
+    pairs[id].server.end()
+})
+
+ipc.on('tokenGet', event => {
+    tokens.forEach(t => event.sender.send('tokenAdd', t))
+})
+
+ipc.on('tokenReplace', (_, token) => {
+    var i = tokens.findIndex(t => t.token == token.token)
+    tokens[i].replaceWith = token.replaceWith
+})
